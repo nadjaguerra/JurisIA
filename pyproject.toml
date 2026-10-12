@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jurisia"
+version = "0.1.0"
+description = "Pesquisa acadêmica de jurisprudência do STJ com recuperação e RAG"
+requires-python = ">=3.11"
+dependencies = [
+  "chromadb>=1.0,<3",
+  "sentence-transformers>=4,<6",
+  "streamlit>=1.40,<3",
+  "google-genai>=1.0,<3",
+  "python-dotenv>=1,<2",
+  "pandas>=2,<4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[project.scripts]
+jurisia = "jurisia.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
