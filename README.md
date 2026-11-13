@@ -1,5 +1,11 @@
 # JurisIA
 
+[![Python 3.11 ou superior](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](#executar-localmente)
+[![Interface Streamlit](https://img.shields.io/badge/Interface-Streamlit-FF4B4B?style=flat-square&logo=streamlit&logoColor=white)](#executar-localmente)
+[![Dados abertos do STJ](https://img.shields.io/badge/Dados-STJ-2E7D32?style=flat-square)](#fonte-e-limites)
+[![Testes com pytest](https://img.shields.io/badge/Testes-pytest-0A9EDC?style=flat-square&logo=pytest&logoColor=white)](#verificação-e-avaliação)
+[![Licença MIT](https://img.shields.io/badge/Licen%C3%A7a-MIT-8250DF?style=flat-square)](LICENSE)
+
 Ferramenta de pesquisa acadêmica de jurisprudência do Superior Tribunal de
 Justiça (STJ), desenvolvida como projeto de Ciência de Dados na UFMS. O app
 consulta ementas de espelhos de acórdãos publicados no Portal de Dados Abertos
@@ -57,20 +63,40 @@ a síntese.
 ```text
 JurisIA/
 ├── app/
-│   └── streamlit_app.py          # Interface de pesquisa e exploração
-├── src/
-│   └── jurisia/                  # Coleta, preparação, busca, síntese e métricas
+│   └── streamlit_app.py             # Interface de pesquisa, exploração e feedback
 ├── data/
-│   └── sample/                   # Modelos CSV para avaliação
-├── reports/                      # Auditoria e verificações locais
-├── tests/                        # Testes automatizados
-├── .env.example                  # Exemplo de configuração
-├── AVALIACAO.md                  # Guia de avaliação
-├── METODOLOGIA.md                # Recorte, procedimento e limites do estudo
-├── LICENSE
-├── README.md
-├── pyproject.toml
-└── requirements.txt
+│   └── sample/
+│       ├── questions_template.csv   # Modelo de perguntas e IDs relevantes
+│       └── synthesis_review.csv     # Modelo de revisão de afirmações e evidências
+├── reports/
+│   ├── base_audit.json              # Cobertura da base e do índice local
+│   └── execution_smoke.json         # Registro de uma verificação local
+├── src/
+│   └── jurisia/
+│       ├── __init__.py              # Inicialização do pacote Python
+│       ├── audit.py                 # Auditoria da base e revisão de sínteses
+│       ├── chunking.py              # Divisão das ementas em trechos
+│       ├── cli.py                   # Comandos do terminal
+│       ├── config.py                # Caminhos, modelos e fontes de dados
+│       ├── download.py              # Coleta dos dados abertos do STJ
+│       ├── evaluation.py            # Métricas de recuperação
+│       ├── explore.py               # Distribuição dos resultados e comparação de listas
+│       ├── prepare.py               # Importação e deduplicação no SQLite
+│       ├── rag.py                   # Síntese com fontes, abstinência e feedback
+│       ├── search.py                # Busca textual e vetorial, filtros e paginação
+│       └── spellcheck.py            # Correção ortográfica opcional
+├── tests/
+│   ├── test_explore.py              # Ordenação, filtros, exploração e feedback
+│   ├── test_improvements.py         # Atualização, segurança do índice e avaliação
+│   └── test_pipeline.py             # Preparação, fragmentação e reranking
+├── .env.example                     # Exemplo de configuração sem credenciais
+├── .gitignore                       # Arquivos locais excluídos do Git
+├── AVALIACAO.md                     # Guia de avaliação
+├── METODOLOGIA.md                   # Recorte, procedimento e limites do estudo
+├── LICENSE                          # Licença MIT do código
+├── README.md                        # Apresentação e instruções de uso
+├── pyproject.toml                   # Dependências, pacote e configuração de testes
+└── requirements.txt                 # Entrada de instalação via pip
 ```
 
 Consulte a [metodologia](METODOLOGIA.md) e o [guia de avaliação](AVALIACAO.md).
