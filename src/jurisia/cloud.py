@@ -7,10 +7,31 @@ import tempfile
 from pathlib import Path
 from threading import Lock
 from urllib.request import urlopen
+from urllib.error import HTTPError
 from zipfile import ZipFile
 
 BASE = "https://github.com/nadjaguerra/JurisIA/releases"
+API = "https://api.github.com/repos/nadjaguerra/JurisIA/releases"
 LOCK = Lock()
+
+
+def latest_manifest():
+    try:
+        with urlopen(f"{BASE}/latest/download/jurisia-manifest.json", timeout=30) as response:
+            return json.load(response)
+    except HTTPError as error:
+        if error.code != 404:
+            raise
+    with urlopen(f"{API}?per_page=30", timeout=30) as response:
+        releases = json.load(response)
+    for release in releases:
+        tag = release["tag_name"]
+        if tag.startswith("lexical-") and tag.removeprefix("lexical-").isascii() and tag.removeprefix("lexical-").isdecimal():
+            with urlopen(f"{BASE}/download/{tag}/jurisia-manifest.json", timeout=30) as response:
+                manifest = json.load(response)
+            if manifest.get("lexical_only") is True and tag == f"lexical-{manifest['version']}":
+                return manifest
+    raise FileNotFoundError("Nenhuma base pública disponível")
 
 
 def install(home, manifest, archive):
@@ -30,9 +51,9 @@ def install(home, manifest, archive):
                 if any(part in {"..", "."} or ":" in part or "\\" in part for part in name.split("/")):
                     raise ValueError("Caminho inválido")
             zipped.extractall(staging)
-        if not (staging / "data/processed/jurisia.sqlite3").is_file() or not (
+        if not (staging / "data/processed/jurisia.sqlite3").is_file() or (not manifest.get("lexical_only") and not (
             staging / "vectorstore/chroma/active_index.json"
-        ).is_file():
+        ).is_file()):
             raise ValueError("Snapshot incompleto")
         staging.replace(target)
     pointer = home / "current.tmp"
@@ -51,8 +72,7 @@ def setup_cloud():
         home.mkdir(exist_ok=True)
         pointer = home / "current"
         try:
-            with urlopen(f"{BASE}/latest/download/jurisia-manifest.json", timeout=30) as response:
-                manifest = json.load(response)
+            manifest = latest_manifest()
             version = manifest["version"]
             if not version.isascii() or not version.isdecimal():
                 raise ValueError("Versão inválida")
@@ -60,7 +80,8 @@ def setup_cloud():
             if not target.is_dir():
                 with tempfile.TemporaryDirectory(dir=home) as tmp:
                     archive = Path(tmp) / "data.zip"
-                    with urlopen(f"{BASE}/download/data-{version}/jurisia-data.zip", timeout=180) as source, archive.open("wb") as output:
+                    prefix = "lexical" if manifest.get("lexical_only") else "data"
+                    with urlopen(f"{BASE}/download/{prefix}-{version}/jurisia-data.zip", timeout=180) as source, archive.open("wb") as output:
                         shutil.copyfileobj(source, output)
                     target = install(home, manifest, archive)
         except Exception:

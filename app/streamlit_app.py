@@ -4,6 +4,7 @@ import html
 import copy
 from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -24,12 +25,14 @@ except Exception:
     st.error("A base pública ainda não está disponível. Tente novamente quando a geração no GitHub Actions terminar.")
     st.stop()
 
-from jurisia.config import DB
+from jurisia.config import DB, VECTOR
 from jurisia.rag import (CONTEXT_EMENTA_CHARS, ask, generate, metrics, record_feedback,
                          record_result_feedback, record_synthesis, retrieve)
 from jurisia.spellcheck import correct_query
 from jurisia.search import lexical_search, search
 from jurisia.explore import distribution, group, rank_comparison
+
+SEMANTIC_AVAILABLE = os.getenv("JURISIA_CLOUD") != "1" or (VECTOR / "active_index.json").is_file()
 
 STJ_PORTAL_URL = "https://www.stj.jus.br/sites/portalp/Jurisprudencia/Acordaos-e-Decisoes"
 st.markdown("""
@@ -330,7 +333,9 @@ def explore_results():
             st.info("A consulta não retornou acórdãos para agrupar.")
     with compare:
         st.caption("Mesma consulta, órgão, período e limite de resultados. A busca por palavras usa a base SQLite; a busca por significado usa a parte dela que foi indexada e aplica o limiar de similaridade. Compare as posições, não os escores.")
-        if st.button("Comparar palavras e significado", disabled=task_busy()):
+        if not SEMANTIC_AVAILABLE:
+            st.info("A comparação ficará disponível após a publicação do índice semântico.")
+        if st.button("Comparar palavras e significado", disabled=task_busy() or not SEMANTIC_AVAILABLE):
             st.session_state.pop("jurisia_job_error", None)
             st.session_state["jurisia_future"] = background_executor().submit(comparison_job, result)
             st.session_state["jurisia_phase"] = "comparison"
@@ -669,7 +674,9 @@ if page == "Pesquisar jurisprudência":
         year_to = c.number_input("Ano final", 1900, 2100, last_year)
         k = d.selectbox("Acórdãos por página", [5, 15, 30])
         colored = st.checkbox("Destacar palavras da pesquisa", value=True)
-        method = st.selectbox("Método de busca", ["Por palavras", "Por significado"],
+        if not SEMANTIC_AVAILABLE:
+            st.caption("A busca por palavras está disponível. O índice para busca por significado ainda está em preparação.")
+        method = st.selectbox("Método de busca", ["Por palavras", "Por significado"] if SEMANTIC_AVAILABLE else ["Por palavras"],
                               help="A busca por palavras não precisa carregar o modelo semântico.")
         with st.expander("Opções avançadas"):
             apply_correction = st.checkbox("Verificar ortografia antes da busca", value=False)

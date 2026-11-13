@@ -1,0 +1,35 @@
+name: Publicar busca por palavras
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/cloud-lexical.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  lexical:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PYTHONPATH: src
+      SNAPSHOT_VERSION: ${{ github.run_id }}${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install python-dotenv
+      - name: Preparar corpus completo da Terceira Turma
+        run: |
+          python -m jurisia.cli sync --dataset espelhos-de-acordaos-terceira-turma
+          python -m jurisia.cli prepare
+          python scripts/build_lexical_snapshot.py
+      - name: Publicar base textual validada
+        run: |
+          tag="lexical-${SNAPSHOT_VERSION}"
+          gh release create "$tag" --draft --target "$GITHUB_SHA" --title "Base textual · $SNAPSHOT_VERSION" --notes "Corpus da Terceira Turma sem índice semântico; gerado na nuvem." cloud-output/jurisia-data.zip cloud-output/jurisia-manifest.json
+          gh release edit "$tag" --draft=false --prerelease --latest=false
