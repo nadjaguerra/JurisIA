@@ -30,3 +30,4 @@ vectorstore/
 *.log
 *.tmp
 .pytest_tmp*/
+cloud-output/

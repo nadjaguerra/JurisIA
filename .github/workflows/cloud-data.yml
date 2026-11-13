@@ -1,0 +1,45 @@
+name: Gerar base pública do JurisIA
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 4 * * 1'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: jurisia-public-data
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SNAPSHOT_VERSION: ${{ github.run_id }}${{ github.run_attempt }}
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Instalar dependências CPU
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e .
+      - name: Coletar e indexar a Terceira Turma
+        run: |
+          jurisia sync --dataset espelhos-de-acordaos-terceira-turma
+          jurisia prepare
+          jurisia index --limit 0
+      - name: Validar e empacotar
+        run: python scripts/build_cloud_snapshot.py
+      - name: Disponibilizar a versão validada
+        run: |
+          tag="data-${SNAPSHOT_VERSION}"
+          gh release create "$tag" --draft --target "$GITHUB_SHA" --title "Base do STJ · $SNAPSHOT_VERSION" --notes "SQLite e índice completo da Terceira Turma, gerados e verificados no GitHub Actions." cloud-output/jurisia-data.zip cloud-output/jurisia-manifest.json
+          gh release edit "$tag" --draft=false --latest

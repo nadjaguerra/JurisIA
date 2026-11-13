@@ -14,14 +14,22 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+st.set_page_config(page_title="JurisIA | Pesquisa no STJ", page_icon="⚖️", layout="wide")
+
+from jurisia.cloud import setup_cloud
+
+try:
+    setup_cloud()
+except Exception:
+    st.error("A base pública ainda não está disponível. Tente novamente quando a geração no GitHub Actions terminar.")
+    st.stop()
+
 from jurisia.config import DB
 from jurisia.rag import (CONTEXT_EMENTA_CHARS, ask, generate, metrics, record_feedback,
                          record_result_feedback, record_synthesis, retrieve)
 from jurisia.spellcheck import correct_query
 from jurisia.search import lexical_search, search
 from jurisia.explore import distribution, group, rank_comparison
-
-st.set_page_config(page_title="JurisIA | Pesquisa no STJ", page_icon="⚖️", layout="wide")
 
 STJ_PORTAL_URL = "https://www.stj.jus.br/sites/portalp/Jurisprudencia/Acordaos-e-Decisoes"
 st.markdown("""

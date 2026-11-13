@@ -6,9 +6,10 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT / ".env")
 RAW = ROOT / "data" / "raw"
-PROCESSED = ROOT / "data" / "processed"
+DATA_HOME = Path(os.getenv("JURISIA_DATA_HOME", ROOT))
+PROCESSED = DATA_HOME / "data" / "processed"
 DB = PROCESSED / "jurisia.sqlite3"
-VECTOR = ROOT / "vectorstore" / "chroma"
+VECTOR = DATA_HOME / "vectorstore" / "chroma"
 COLLECTION = "ementas_stj_v1"
 EMBEDDING_MODEL = os.getenv(
     "EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"

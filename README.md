@@ -60,6 +60,8 @@ a síntese.
 
 ## Organização do repositório
 
+Para publicar sem depender de um computador local, consulte [DEPLOY.md](DEPLOY.md).
+
 ```text
 JurisIA/
 ├── app/
