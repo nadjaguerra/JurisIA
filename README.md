@@ -1,5 +1,11 @@
 # JurisIA
 
+[![Python 3.11 ou superior](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](#executar-localmente)
+[![Interface Streamlit](https://img.shields.io/badge/Interface-Streamlit-FF4B4B?style=flat-square&logo=streamlit&logoColor=white)](#executar-localmente)
+[![Dados abertos do STJ](https://img.shields.io/badge/Dados-STJ-2E7D32?style=flat-square)](#fonte-e-limites)
+[![Testes com pytest](https://img.shields.io/badge/Testes-pytest-0A9EDC?style=flat-square&logo=pytest&logoColor=white)](#verificação-e-avaliação)
+[![Licença MIT](https://img.shields.io/badge/Licen%C3%A7a-MIT-8250DF?style=flat-square)](LICENSE)
+
 Ferramenta de pesquisa acadêmica de jurisprudência do Superior Tribunal de
 Justiça (STJ), desenvolvida como projeto de Ciência de Dados na UFMS. O app
 consulta ementas de espelhos de acórdãos publicados no Portal de Dados Abertos
