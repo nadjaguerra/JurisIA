@@ -39,7 +39,23 @@ def connect(path: Path = DB) -> sqlite3.Connection:
           created_at TEXT DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY(question_id) REFERENCES questions(id)
         );
+        CREATE TABLE IF NOT EXISTS result_feedback (
+          question_id INTEGER NOT NULL REFERENCES questions(id),
+          document_id TEXT NOT NULL,
+          rank INTEGER NOT NULL,
+          method TEXT NOT NULL,
+          relevant INTEGER NOT NULL CHECK(relevant IN (0,1)),
+          PRIMARY KEY(question_id, document_id)
+        );
     """)
+    columns = {row[1] for row in db.execute("PRAGMA table_info(imported_resources)")}
+    if "sha256" not in columns:
+        db.execute("ALTER TABLE imported_resources ADD COLUMN sha256 TEXT")
+    columns = {row[1] for row in db.execute("PRAGMA table_info(questions)")}
+    for name in ("search_seconds", "synthesis_seconds"):
+        if name not in columns:
+            db.execute(f"ALTER TABLE questions ADD COLUMN {name} REAL")
+    db.commit()
     return db
 
 
@@ -76,14 +92,19 @@ def import_all(path: Path = DB) -> dict:
     for manifest_path in manifests:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         dataset = manifest["dataset"]
+        replay = False
         for item in sorted(manifest["resources"], key=lambda r: r["name"]):
             name = item["name"]
-            if db.execute("SELECT 1 FROM imported_resources WHERE dataset=? AND resource=?",
-                          (dataset, name)).fetchone():
-                continue
             file = manifest_path.parent / name
             if not file.exists():
                 raise FileNotFoundError(file)
+            from .download import file_hash
+            digest = file_hash(file)
+            previous = db.execute("SELECT sha256 FROM imported_resources WHERE dataset=? AND resource=?",
+                                  (dataset, name)).fetchone()
+            if previous and previous[0] == digest and not replay:
+                continue
+            replay = True
             with db:
                 for row in _records(file):
                     ident = str(row.get("id") or "").strip()
@@ -115,7 +136,8 @@ def import_all(path: Path = DB) -> dict:
                         name, item["url"],
                     ))
                     stats["records"] += 1
-                db.execute("INSERT INTO imported_resources VALUES (?,?)", (dataset, name))
+                db.execute("INSERT OR REPLACE INTO imported_resources(dataset,resource,sha256) VALUES (?,?,?)",
+                           (dataset, name, digest))
             stats["resources"] += 1
             print(f"Importado: {dataset}/{name}", flush=True)
     stats["unique"] = db.execute("SELECT COUNT(*) FROM documents").fetchone()[0]

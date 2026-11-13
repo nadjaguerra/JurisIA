@@ -15,8 +15,11 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jurisia.config import DB
-from jurisia.rag import ask, generate, metrics
+from jurisia.rag import (CONTEXT_EMENTA_CHARS, ask, generate, metrics, record_feedback,
+                         record_result_feedback, record_synthesis, retrieve)
 from jurisia.spellcheck import correct_query
+from jurisia.search import lexical_search, search
+from jurisia.explore import distribution, group, rank_comparison
 
 st.set_page_config(page_title="JurisIA | Pesquisa no STJ", page_icon="⚖️", layout="wide")
 
@@ -114,7 +117,7 @@ def readable_citations(answer, hits):
             label = f"Documento STJ {doc.get('id') or hits[index].get('id') or index + 1}"
         # Escapa pontuação de Markdown presente nos metadados.
         label = re.sub(r"([\\`*_{}\[\]<>])", r"\\\1", label)
-        return f"[{label}]"
+        return f"[D{index + 1} · {label}](#fonte-d{index + 1})"
     return re.sub(r"\[D(\d+)\]", replace, answer)
 
 
@@ -171,14 +174,26 @@ def save_document(hit):
                      (str(hit['id']), json.dumps(hit['document'], ensure_ascii=False), datetime.now().isoformat()))
 
 
-def run_search(question, apply_correction=True, **kwargs):
+def run_search(question, apply_correction=False, **kwargs):
+    started = time.monotonic()
     correction = correct_query(question) if apply_correction else {
         "original": question, "query": question, "suggestion": "", "changes": []
     }
-    result = ask(correction["query"], with_gemini=False, **kwargs)
+    result = ask(correction["query"], with_gemini=False, newest_first=True, **kwargs)
+    result["seconds"] = time.monotonic() - started
     result.update(query=correction["query"], original_query=question,
-                  correction=correction, search_options=kwargs, warning="")
+                  correction=correction, search_options=kwargs, warning="",
+                  page_offset=len(result["hits"]), has_more=len(result["hits"]) == kwargs["k"])
     return result
+
+
+def load_more_job(result):
+    offset = result["page_offset"]
+    options = result["search_options"]
+    page = retrieve(result["query"], **options, newest_first=True, offset=offset)
+    seen = {hit["id"] for hit in result["hits"]}
+    return {**result, "hits": [*result["hits"], *(hit for hit in page if hit["id"] not in seen)],
+            "page_offset": offset + len(page), "has_more": len(page) == options["k"]}
 
 
 def make_synthesis(result):
@@ -203,7 +218,7 @@ def make_synthesis(result):
         "Se as fontes forem insuficientes, explique a limitação e omita o exemplo."
     )
     try:
-        result['answer'] = generate(synthesis_question, result['hits'])
+        result['answer'] = generate(synthesis_question, result['hits'][:result["search_options"]["k"]])
     except Exception as exc:
         details = str(exc)
         # Oculta a chave caso ela apareça na mensagem da API.
@@ -226,6 +241,7 @@ def make_synthesis(result):
             result['warning'] = 'Não foi possível gerar a síntese. Confira a conexão e a configuração do Gemini.'
         result['answer'] = ''
     result['ai_seconds'] = time.monotonic() - started
+    record_synthesis(result['question_id'], result['ai_seconds'])
 
 
 def task_busy():
@@ -254,7 +270,78 @@ def synthesis_job(result):
     return result
 
 
-def start_search(question, colored, display_mode, apply_correction=True, **options):
+def comparison_job(result):
+    options = result["search_options"]
+    filters = {key: options[key] for key in ("k", "body", "year_from", "year_to")}
+    query = result["query"]
+    by_words = lexical_search(query, **filters)
+    by_meaning = search(query, **filters, min_similarity=options["min_similarity"], use_rerank=False)
+    return {**result, "comparison": rank_comparison(by_words, by_meaning)}
+
+
+@st.fragment(run_every=0.5 if task_busy() else None)
+def explore_results():
+    if finish_job():
+        st.rerun()
+    result = st.session_state.get("jurisia_result")
+    if not result:
+        st.info("Faça uma pesquisa para explorar os acórdãos retornados.")
+        return
+    st.caption(f"Consulta: {result['query']} · {len(result['hits'])} acórdãos retornados.")
+    panel, compare = st.tabs(["Distribuição dos resultados", "Comparação dos métodos"])
+    with panel:
+        if result["hits"]:
+            import altair as alt
+            import pandas as pd
+
+            fields = {"Ano de julgamento": "decision_date", "Relator": "rapporteur", "Classe processual": "process_class"}
+            dimension = st.selectbox("Agrupar por", list(fields))
+            field = fields[dimension]
+            counts = distribution(result["hits"], field)
+            data = pd.DataFrame(list(counts.items()), columns=["Grupo", "Acórdãos"])
+            pick = alt.selection_point(name="grupo", fields=["Grupo"], toggle=False)
+            order = "ascending" if field == "decision_date" else "-x"
+            chart = alt.Chart(data).mark_bar().encode(
+                x=alt.X("Acórdãos:Q", axis=alt.Axis(tickMinStep=1)),
+                y=alt.Y("Grupo:N", title=dimension, sort=order),
+                opacity=alt.condition(pick, alt.value(1), alt.value(0.4)),
+                tooltip=["Grupo:N", "Acórdãos:Q"],
+            ).add_params(pick)
+            st.caption("Clique em uma barra para filtrar a lista. O gráfico cobre só esta consulta; não mostra tendências de todo o STJ.")
+            event = st.altair_chart(chart, on_select="rerun", selection_mode="grupo",
+                                    key=f"distribution_{result['question_id']}_{field}")
+            selected = event.selection.get("grupo") or []
+            active = {item["Grupo"] for item in selected if "Grupo" in item}
+            hits = [hit for hit in result["hits"] if not active or group(hit, field) in active]
+            for hit in hits:
+                doc = hit["document"]
+                with st.expander(f"{doc.get('process_class') or ''} {doc.get('process_number') or hit['id']} · {date_label(doc.get('decision_date'))}"):
+                    st.write(hit["snippet"])
+                    st.caption(doc.get("rapporteur") or "Relator não informado")
+        else:
+            st.info("A consulta não retornou acórdãos para agrupar.")
+    with compare:
+        st.caption("Mesma consulta, órgão, período e limite de resultados. A busca por palavras usa a base SQLite; a busca por significado usa a parte dela que foi indexada e aplica o limiar de similaridade. Compare as posições, não os escores.")
+        if st.button("Comparar palavras e significado", disabled=task_busy()):
+            st.session_state.pop("jurisia_job_error", None)
+            st.session_state["jurisia_future"] = background_executor().submit(comparison_job, result)
+            st.session_state["jurisia_phase"] = "comparison"
+            st.rerun()
+        if st.session_state.get("jurisia_phase") == "comparison":
+            st.status("Comparando os métodos…", state="running", expanded=False)
+        if st.session_state.get("jurisia_job_error"):
+            st.error(st.session_state["jurisia_job_error"])
+        if "comparison" in result:
+            rows = result["comparison"]
+            if rows:
+                for cell, label in zip(st.columns(3), ("Nas duas", "Só palavras", "Só significado")):
+                    cell.metric(label, sum(row["Presença"] == label for row in rows))
+                st.dataframe(rows, hide_index=True, use_container_width=True)
+            else:
+                st.info("Nenhum acórdão foi retornado pelos dois métodos.")
+
+
+def start_search(question, colored, display_mode, apply_correction=False, **options):
     if task_busy():
         return False
     st.session_state.pop("jurisia_result", None)
@@ -291,7 +378,10 @@ def finish_job():
     except Exception:
         st.session_state["jurisia_job_error"] = (
             "Não foi possível consultar o índice. Confira a preparação e a indexação."
-            if phase == "search" else
+            if phase == "search" else "Não foi possível comparar os métodos. Confira os índices da base."
+            if phase == "comparison" else
+            "Não foi possível carregar mais acórdãos. Tente novamente."
+            if phase == "more" else
             "Não foi possível gerar a síntese. Tente novamente."
         )
     return True
@@ -333,7 +423,10 @@ def research_results():
         show_documents = result.get("display_mode", "Síntese e acórdãos") == "Síntese e acórdãos"
         if show_documents:
             st.markdown("### Resultados da pesquisa")
-            st.caption(f"Consulta: {result['query']} · {len(result['hits'])} acórdãos · {result['seconds']:.1f} segundos")
+            st.caption(f"Consulta: {result['query']} · {len(result['hits'])} acórdãos exibidos · Busca inicial: {result['seconds']:.1f} s")
+            st.caption("Ordem por data de julgamento: do mais recente ao mais antigo.")
+            if result["search_options"]["method"] == "semantic":
+                st.caption("Na busca por significado, essa ordem vale para os candidatos mais próximos do tema.")
         else:
             st.caption(f"Consulta: {result['query']}")
         synthesis_slot = st.container()
@@ -354,7 +447,10 @@ def research_results():
                 st.markdown('<div class="snippet">' + highlight(hit["snippet"], result["query"], result["colored"]) + '</div>', unsafe_allow_html=True)
                 with st.expander("Ler ementa completa"):
                     st.write(doc.get("ementa") or "Sem ementa disponível.")
-                    st.caption(f"Identificador: {hit['id']} · Similaridade: {hit['similarity']:.3f}. Não é probabilidade de correção.")
+                    if "similarity" in hit:
+                        st.caption(f"ID: {hit['id']} · Similaridade: {hit['similarity']:.3f}. Não é probabilidade de correção.")
+                    else:
+                        st.caption(f"ID: {hit['id']} · Encontrado por palavras.")
                 st.link_button("Consultar no portal do STJ ↗", STJ_PORTAL_URL)
                 st.caption("Para consultar a decisão individual, use o número do processo no portal do STJ.")
                 ident = str(hit['id'])
@@ -362,20 +458,34 @@ def research_results():
                              key=f"save_{ident}", disabled=ident in saved_ids):
                     save_document(hit)
                     st.rerun()
+                vote_key = f"vote_{result['question_id']}_{ident}"
+                for column, label, relevant in zip(st.columns(2), ("Relevante", "Não relevante"), (True, False)):
+                    if column.button(label, key=f"{vote_key}_{relevant}"):
+                        record_result_feedback(result["question_id"], ident, number,
+                                               result["search_options"]["method"], relevant)
+                        st.session_state[vote_key] = label
+                if vote_key in st.session_state:
+                    st.caption(f"Marcado como: {st.session_state[vote_key]}")
+        if show_documents and result.get("has_more"):
+            if st.button("Ver mais acórdãos", key="load_more", disabled=task_busy()):
+                st.session_state.pop("jurisia_job_error", None)
+                st.session_state["jurisia_future"] = background_executor().submit(load_more_job, result)
+                st.session_state["jurisia_phase"] = "more"
+                st.rerun()
+            if st.session_state.get("jurisia_phase") == "more":
+                st.status("Carregando acórdãos mais antigos…", state="running", expanded=False)
+        elif show_documents and result["hits"]:
+            st.caption("Todos os resultados disponíveis para esta busca foram exibidos.")
         # Renderiza as decisões antes de chamar um serviço externo.
         with synthesis_slot:
             if result['hits']:
                 with st.container(border=True):
                     st.markdown("#### Síntese")
-                    st.caption("Síntese automática baseada nos acórdãos encontrados. A pergunta e os trechos são enviados ao Gemini.")
-                    request_ai = False
-                    if result.get('synthesis_attempted'):
-                        request_ai = st.button(
-                            "Gerar novamente" if result.get('answer') else "Tentar síntese novamente",
-                            key="make_synthesis",
-                            disabled=task_busy(),
-                        )
-                    if (not result.get('synthesis_attempted') or request_ai) and not task_busy():
+                    st.caption("A síntese usa a primeira página de acórdãos. A pergunta e os trechos são enviados ao Gemini.")
+                    request_ai = st.button(
+                        "Gerar novamente" if result.get("answer") else "Gerar síntese",
+                        key="make_synthesis", disabled=task_busy())
+                    if request_ai:
                         if start_synthesis(result):
                             st.rerun()
                     if task_busy() and st.session_state.get("jurisia_phase") == "synthesis":
@@ -388,6 +498,31 @@ def research_results():
                     if result.get('answer'):
                         st.write(readable_citations(result['answer'], result['hits']))
                         st.caption(f"Síntese: {result['ai_seconds']:.1f} segundos · Confira as afirmações nas fontes citadas.")
+                        for number in dict.fromkeys(map(int, re.findall(r"\[D(\d+)\]", result["answer"]))):
+                            if not 1 <= number <= len(result["hits"]):
+                                continue
+                            hit = result["hits"][number - 1]
+                            doc = hit["document"]
+                            st.subheader(f"D{number} · {doc.get('process_class') or ''} {doc.get('process_number') or hit['id']}",
+                                         anchor=f"fonte-d{number}")
+                            st.caption(f"Julgamento: {date_label(doc.get('decision_date'))} · {doc.get('court_body') or 'Órgão não informado'}")
+                            st.text(hit["snippet"])
+                            with st.expander("Ver início da ementa enviado ao Gemini"):
+                                st.text((doc.get("ementa") or "")[:CONTEXT_EMENTA_CHARS])
+        st.caption("Participação opcional. Evite dados pessoais no comentário.")
+        with st.form(f"feedback_{result['question_id']}"):
+            st.markdown("#### Avalie esta pesquisa")
+            scores = {name: st.slider(label, 1, 5, 3) for name, label in (
+                ("clarity", "Clareza"), ("relevance", "Relevância"),
+                ("confidence", "Confiança nas fontes"), ("usability", "Facilidade de uso"),
+                ("satisfaction", "Satisfação geral"))}
+            useful = st.radio("A pesquisa foi útil?", ["Sim", "Não", "Não sei"], horizontal=True)
+            reuse = st.radio("Utilizaria novamente?", ["Sim", "Talvez", "Não"], horizontal=True)
+            comment = st.text_area("O que você melhoraria?", max_chars=2000)
+            if st.form_submit_button("Enviar avaliação"):
+                record_feedback(result['question_id'], {"Sim": True, "Não": False, "Não sei": None}[useful],
+                                **scores, reuse=reuse, comment=comment)
+                st.success("Avaliação registrada.")
     elif task_busy():
         st.status("Buscando decisões…", state="running", expanded=False)
     else:
@@ -400,7 +535,7 @@ with st.sidebar:
     st.markdown('<div class="brand">Juris<span>IA</span></div>', unsafe_allow_html=True)
     st.caption("PESQUISA JURISPRUDENCIAL")
     st.divider()
-    page = st.radio("Navegação", ["Pesquisar jurisprudência", "Meu caderno", "Dados da base"], label_visibility="collapsed")
+    page = st.radio("Navegação", ["Pesquisar jurisprudência", "Explorar jurisprudência", "Meu caderno", "Dados da base"], label_visibility="collapsed")
     st.divider()
     st.markdown("### Superior Tribunal de Justiça")
     st.caption("Acórdãos para consultas de estudo e trabalho.")
@@ -506,28 +641,30 @@ if page == "Pesquisar jurisprudência":
     <p>Pesquise por assunto ou faça uma pergunta. Explore as decisões e confira as fontes.</p></div>''', unsafe_allow_html=True)
     if bodies:
         st.caption("Cobertura da base: " + ", ".join(bodies) + " · STJ")
-    with st.form("search_form", enter_to_submit=True):
+    with st.form("search_form", enter_to_submit=False):
         st.markdown('<div class="step"><b>1</b> O que você quer pesquisar?</div>', unsafe_allow_html=True)
         question = st.text_input("Assunto ou pergunta",
                                 placeholder="Ex.: Qual é o entendimento do STJ sobre responsabilidade civil por erro médico?")
-        st.caption("Pressione Enter ou clique em Pesquisar no STJ.")
         st.markdown('<div class="step"><b>2</b> Como você quer ver a resposta?</div>', unsafe_allow_html=True)
         display_mode = st.radio(
             "Formato da resposta",
-            ["Apenas a síntese", "Síntese e acórdãos"],
-            index=1,
+            ["Síntese e acórdãos", "Apenas a síntese"],
+            index=0,
             horizontal=True,
             label_visibility="collapsed",
         )
         st.markdown('<div class="step"><b>3</b> Refine sua pesquisa</div>', unsafe_allow_html=True)
         a, b, c, d = st.columns([2, 1, 1, 1])
-        a.text_input("Órgão julgador", value="Terceira Turma", disabled=True)
-        body = next((name for name in bodies if "TERCEIRA TURMA" in name.upper()), None)
+        selected_body = a.selectbox("Órgão julgador", ["Todos os órgãos"] + bodies)
+        body = None if selected_body == "Todos os órgãos" else selected_body
         year_from = b.number_input("Ano inicial", 1900, 2100, first_year)
         year_to = c.number_input("Ano final", 1900, 2100, last_year)
-        k = d.selectbox("Número de acórdãos", [5, 15, 30])
+        k = d.selectbox("Acórdãos por página", [5, 15, 30])
         colored = st.checkbox("Destacar palavras da pesquisa", value=True)
+        method = st.selectbox("Método de busca", ["Por palavras", "Por significado"],
+                              help="A busca por palavras não precisa carregar o modelo semântico.")
         with st.expander("Opções avançadas"):
+            apply_correction = st.checkbox("Verificar ortografia antes da busca", value=False)
             rerank = st.checkbox("Combinar significado e palavras na ordenação", value=True)
             threshold = st.slider("Similaridade mínima", 0.0, 0.8, 0.30, 0.01,
                                   help="Parâmetro experimental. Não representa probabilidade de correção.")
@@ -540,12 +677,17 @@ if page == "Pesquisar jurisprudência":
         else:
             if start_search(
                 question.strip(), colored, display_mode,
+                apply_correction=apply_correction, method="lexical" if method == "Por palavras" else "semantic",
                 k=k, body=body, year_from=int(year_from), year_to=int(year_to),
                 min_similarity=threshold, use_rerank=rerank,
             ):
                 st.rerun()
     research_results()
 
+
+elif page == "Explorar jurisprudência":
+    st.title("Explorar jurisprudência")
+    explore_results()
 
 elif page == "Meu caderno":
     st.title("Meu caderno")
@@ -595,6 +737,9 @@ else:
     a.metric("Acórdãos importados", f"{values['documents']:,}".replace(",", "."))
     b.metric("Consultas realizadas", values["questions"])
     c.metric("Tempo médio registrado", f"{values['avg_seconds']:.1f} s")
+    st.caption(f"Busca: {values.get('avg_search_seconds', 0):.1f} s em média · Síntese: {values.get('avg_synthesis_seconds', 0):.1f} s em média. As etapas podem ter quantidades diferentes de registros.")
+    st.caption(f"Avaliações recebidas: {values['feedback']} · Utilidade percebida: " +
+               (f"{values['useful_rate']:.0%}" if values['useful_rate'] is not None else "Ainda sem respostas"))
     if DB.exists():
         import pandas as pd
         with sqlite3.connect(DB) as conn:

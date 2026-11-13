@@ -23,7 +23,12 @@ def main():
     evaluation = sub.add_parser("evaluate", help="Avaliar IDs relevantes rotulados")
     evaluation.add_argument("csv", type=Path)
     evaluation.add_argument("--k", type=int, default=5)
-    evaluation.add_argument("--mode", choices=["rerank", "vector"], default="rerank")
+    evaluation.add_argument("--mode", choices=["rerank", "vector", "lexical"], default="rerank")
+    evaluation.add_argument("--min-similarity", type=float, default=0.30)
+    audit = sub.add_parser("audit", help="Relatório da base e ambiente reais")
+    audit.add_argument("--output", type=Path, default=Path("reports/base_audit.json"))
+    synthesis = sub.add_parser("evaluate-synthesis", help="Agregar revisão por afirmação")
+    synthesis.add_argument("csv", type=Path)
     args = parser.parse_args()
     if args.command == "sync":
         from .download import sync as run
@@ -44,10 +49,19 @@ def main():
                   f"({doc.get('court_body')}, {doc.get('decision_date')}) "
                   f"ID={hit['id']} similaridade={hit['similarity']:.3f}")
         return
+    elif args.command == "audit":
+        from .audit import audit
+        result = audit(args.output)
+    elif args.command == "evaluate-synthesis":
+        from .audit import summarize_synthesis
+        from .evaluation import save
+        result = summarize_synthesis(args.csv)
+        save(result, Path("reports") / "synthesis_review.json")
     else:
         from .evaluation import evaluate, save
-        result = evaluate(args.csv, args.k, args.mode)
-        destination = Path("reports") / f"evaluation_{args.mode}.json"
+        result = evaluate(args.csv, args.k, args.mode, args.min_similarity)
+        from datetime import datetime
+        destination = Path("reports") / f"evaluation_{args.mode}_{datetime.now():%Y%m%d_%H%M%S_%f}.json"
         save(result, destination)
         print(f"Relatório: {destination}")
     print(json.dumps(result, ensure_ascii=False, indent=2))

@@ -1,0 +1,30 @@
+{
+  "created_at": "2026-10-22T23:39:24.734407+00:00",
+  "documents": 68308,
+  "empty_ementas": 37,
+  "earliest_decision": "19890502",
+  "latest_decision": "20260824",
+  "bodies": {
+    "TERCEIRA TURMA": 68308
+  },
+  "imported_resources": 53,
+  "python": "3.13.5",
+  "packages": {
+    "chromadb": "1.5.9",
+    "sentence-transformers": "5.7.0",
+    "google-genai": "2.29.0",
+    "streamlit": "1.65.0",
+    "pytest": "9.1.1"
+  },
+  "quality_evaluation": "Não realizada; faltam julgamentos de relevância e revisão das sínteses.",
+  "index": {
+    "collection": "ementas_stj_v1",
+    "chunks": 228787,
+    "parameters": {
+      "overlap_words": 15,
+      "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      "hnsw:space": "cosine",
+      "chunk_words": 70
+    }
+  }
+}

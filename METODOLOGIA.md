@@ -15,7 +15,7 @@ salva o catálogo usado em `data/raw/<dataset>/manifest.json`.
 
 | Conjunto | Período | Recursos | Registros lidos | IDs únicos | Ementas vazias |
 |---|---|---:|---:|---:|---:|
-| Preencher após executar | | | | | |
+| Terceira Turma | 02/05/1989–24/08/2026 | 53 importados | Não contabilizados nesta auditoria | 68.308 | 37 |
 
 ## Preparação
 
@@ -49,6 +49,7 @@ está realmente apoiada pela fonte**. Faça avaliação humana por sentença.
 
 | Configuração | n perguntas | P@5 | R@5 | MRR | Hit Rate | Tempo médio |
 |---|---:|---:|---:|---:|---:|---:|
+| Palavras (FTS5/BM25) | | | | | | |
 | Vetorial | | | | | | |
 | Reranking | | | | | | |
 
@@ -78,3 +79,18 @@ podem alterar entendimento; os documentos podem mencionar teses sem decidir o
 mérito; links de recurso não substituem o inteiro teor. Embeddings, limiar,
 reranking e LLM podem falhar. O projeto é acadêmico, não presta assessoria
 jurídica nem substitui análise profissional do acórdão original.
+
+## Execução e rastreabilidade
+
+Não há amostra fixa obrigatória nem exigência de dois avaliadores.
+O comando audit exporta contagens, período, órgãos, recursos, versões e estado
+do índice em reports/base_audit.json. Esse relatório descreve a instalação;
+não substitui avaliação de qualidade. Métricas de recuperação dependem de IDs
+rotulados; métricas de suporte dependem da revisão por afirmação.
+Compare o baseline lexical, a busca vetorial e o reranking no mesmo corpus.
+A abstinência automática avaliada é a ausência de resultados acima do limiar;
+a abstinência do texto gerado deve ser conferida na revisão da síntese.
+
+Auditoria local executada em 22/10/2026: 228.787 fragmentos no índice ativo,
+com tamanho 70 e sobreposição 15 palavras. Fonte: reports/base_audit.json.
+As contagens descrevem o estado local e não representam validação jurídica.

@@ -1,0 +1,36 @@
+{
+  "scope": "Execução real local em 22/10/2026; sem rótulos de relevância e sem chamadas ao Gemini.",
+  "lexical": [
+    {
+      "question": "responsabilidade civil por erro médico",
+      "ids": [
+        "39993",
+        "666704",
+        "522508",
+        "943475",
+        "739162"
+      ],
+      "seconds": 31.809581200010143,
+      "warmup": true
+    },
+    {
+      "question": "cobrança indevida em contrato bancário",
+      "ids": [
+        "89370",
+        "1426019",
+        "958983",
+        "949091",
+        "559422"
+      ],
+      "seconds": 2.075623699987773,
+      "warmup": false
+    }
+  ],
+  "vector_rerank": "Verificação interrompida: carregamento/consulta não concluiu em tempo útil; sem resultado de integração confirmado.",
+  "streamlit": "AppTest interrompido: inicialização não concluiu em tempo útil; interface não validada visualmente.",
+  "tests": {
+    "passed": 14,
+    "seconds": 2.82
+  },
+  "limitations": "Latências exploratórias de consultas distintas, sem comparação estatística; precisão, recall, MRR e suporte jurídico não medidos sem julgamentos."
+}

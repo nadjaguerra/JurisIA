@@ -1,6 +1,7 @@
 """Coleta recursos anunciados no catálogo CKAN oficial do STJ."""
 
 import json
+import hashlib
 import re
 import shutil
 import time
@@ -41,7 +42,8 @@ def resources(slug: str) -> list[dict]:
         # Somente recursos hospedados pelo tribunal; nunca execute URLs arbitrárias.
         if parsed.hostname not in {"dadosabertos.web.stj.jus.br", "dadosabertos.stj.jus.br"}:
             raise ValueError(f"Verifique o domínio do recurso {name}: {parsed.hostname}")
-        rows.append({"name": name, "url": url, "id": item["id"], "dataset": slug})
+        rows.append({"name": name, "url": url, "id": item["id"], "dataset": slug,
+                     "revision": [item.get("last_modified"), item.get("hash"), item.get("size"), url]})
     return sorted(rows, key=lambda r: r["name"])
 
 
@@ -79,15 +81,20 @@ def sync(slugs: list[str] | None = None) -> dict[str, int]:
         folder = RAW / slug
         folder.mkdir(exist_ok=True)
         items = resources(slug)
+        manifest_path = folder / "manifest.json"
+        previous = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+        old = {item["name"]: item for item in previous.get("resources", [])}
         # Um arquivo local previamente baixado da Terceira Turma pode ser reutilizado.
         for item in items:
             target = folder / item["name"]
             legacy = RAW / item["name"] if slug == "espelhos-de-acordaos-terceira-turma" else None
             if not target.exists() and legacy and legacy.exists():
                 shutil.copy2(legacy, target)
-            if not target.exists():
+            changed = item["name"] in old and old[item["name"]].get("revision") != item.get("revision")
+            if not target.exists() or changed:
                 print(f"Baixando {slug}/{item['name']}", flush=True)
                 _download(item, target)
+            item["sha256"] = file_hash(target)
         manifest = {
             "dataset": slug,
             "collected_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -99,3 +106,11 @@ def sync(slugs: list[str] | None = None) -> dict[str, int]:
         )
         summary[slug] = len(items)
     return summary
+
+
+def file_hash(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()

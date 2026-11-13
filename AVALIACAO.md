@@ -2,11 +2,11 @@
 
 ## Benchmark de recuperação
 
-Monte 60 perguntas antes de ajustar parâmetros: 20 simples, 20
-intermediárias, 10 difíceis e 10 sem resposta conhecida na base. Para cada
-pergunta respondível, examine o resultado da consulta oficial e da base
-local. Registre todos os IDs julgados relevantes por pelo menos dois
-avaliadores. Resolva divergências por revisão conjunta, mantendo anotações.
+Selecione perguntas representativas do recorte e inclua casos sem resposta.
+Não há quantidade fixa obrigatória de perguntas nem exigência de dois
+avaliadores. Documente os critérios de relevância, os IDs julgados relevantes
+e eventuais divergências de revisão. Separe perguntas usadas para ajustar
+parâmetros das usadas para medir o resultado final.
 
 CSV: `question,relevant_ids,category,notes`. Em `relevant_ids`, use **IDs
 do campo `id`**, separados por `|`. Número de processo é outro campo.
