@@ -115,13 +115,15 @@ def _terms(value: str) -> set[str]:
                     if not unicodedata.combining(c))
     return set(re.findall(r"[a-z]{3,}", value)) - {
         "para", "por", "com", "uma", "qual", "quais", "sobre", "que", "stj",
-        "entendimento", "jurisprudencia", "dos", "das",
+        "entendimento", "jurisprudencia", "dos", "das", "aos", "como",
+        "quando", "pode", "podem", "existe", "existem", "tem", "ser", "sao",
     }
 
 
 def lexical_search(question: str, k: int = 5, body: str | None = None,
                    year_from: int | None = None, year_to: int | None = None,
-                   *, newest_first: bool = False, offset: int = 0) -> list[dict]:
+                   *, newest_first: bool = False, offset: int = 0,
+                   match_all: bool = False) -> list[dict]:
     """Baseline de palavras com FTS5/BM25; sem embeddings nem geração."""
     if k <= 0 or offset < 0 or (year_from and year_to and year_from > year_to):
         raise ValueError("Confira a quantidade e o intervalo de anos.")
@@ -135,7 +137,8 @@ def lexical_search(question: str, k: int = 5, body: str | None = None,
                 db.execute("BEGIN IMMEDIATE")
                 _prepare_lexical(db)
         filters = ["lexical_docs MATCH ?"]
-        args = [' OR '.join('"' + term + '"' for term in terms)]
+        operator = " AND " if match_all else " OR "
+        args = [operator.join('"' + term + '"' for term in terms)]
         for value, clause in ((body, "d.court_body = ?"),
                               (f"{year_from}0101" if year_from else None, "d.decision_date >= ?"),
                               (f"{year_to}1231" if year_to else None, "d.decision_date BETWEEN '00010101' AND ?")):

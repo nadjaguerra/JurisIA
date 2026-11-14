@@ -146,3 +146,35 @@ def test_search_applies_date_and_body_filters(monkeypatch):
     assert search.search("pergunta", body="TURMA", year_from=2020, year_to=2025) == []
     assert observed["where"] == {"$and": [{"court_body": "TURMA"},
         {"decision_date": {"$gte": 20200101}}, {"decision_date": {"$lte": 20251231}}]}
+
+
+def test_synthesis_prioritizes_topic_matches_over_recent_generic_hits(tmp_path, monkeypatch):
+    path = tmp_path / "docs.sqlite3"
+    with prepare.connect(path) as db:
+        db.executemany(
+            "INSERT INTO documents(id,ementa,decision_date,raw_json,dataset,resource,resource_url) "
+            "VALUES (?, ?, ?, '{}', 'd', 'r', 'u')",
+            [("generic", "Direito civil e contratos", "20260101"),
+             ("relevant", "Responsabilidade civil por erro médico", "20200101")],
+        )
+    monkeypatch.setattr(search, "DB", path)
+    monkeypatch.setattr(search, "get_documents", lambda ids: prepare.get_documents(ids, path))
+    assert search.lexical_search("erro médico civil", k=1, newest_first=True)[0]["id"] == "generic"
+    assert rag.synthesis_sources("erro médico civil", method="lexical")[0]["id"] == "relevant"
+
+
+@pytest.mark.parametrize(("model_text", "expected"), [
+    ("EVIDENCIA_INSUFICIENTE.\n\nTexto com [D1]", "Os trechos recuperados"),
+    ("Resposta [D1, D2].", "Resposta [D1] [D2]."),
+    ("Resposta [D1, D3].", "Não foi possível validar"),
+])
+def test_synthesis_checks_abstention_and_grouped_citations(monkeypatch, model_text, expected):
+    import sys
+    monkeypatch.setenv("GEMINI_API_KEY", "test-only")
+    monkeypatch.setitem(sys.modules, "google", SimpleNamespace(
+        genai=SimpleNamespace(Client=lambda **kwargs: object())
+    ))
+    monkeypatch.setattr(rag, "_generate_with_retry",
+                        lambda *args: SimpleNamespace(text=model_text))
+    items = [{"document": {}, "snippet": "ementa"}] * 2
+    assert rag.generate("pergunta", items).startswith(expected)

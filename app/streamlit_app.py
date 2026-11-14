@@ -27,7 +27,7 @@ except Exception:
 
 from jurisia.config import DB, VECTOR
 from jurisia.rag import (CONTEXT_EMENTA_CHARS, ask, generate, metrics, record_feedback,
-                         record_result_feedback, record_synthesis, retrieve)
+                         record_result_feedback, record_synthesis, retrieve, synthesis_sources)
 from jurisia.spellcheck import correct_query
 from jurisia.search import lexical_search, search
 from jurisia.explore import distribution, group, rank_comparison
@@ -212,24 +212,20 @@ def make_synthesis(result):
     result['warning'] = ''
     result.pop("ai_error_details", None)
     result['synthesis_attempted'] = True
-    synthesis_question = (
-        f"Pergunta do usuário: {result['query']}\n\n"
-        "Orientações para a resposta: responda diretamente à pergunta, em português "
-        "claro e acessível. Escreva vários parágrafos curtos, com duas ou três frases "
-        "por parágrafo e uma linha em branco entre eles. Comece com a conclusão "
-        "principal; depois explique os fundamentos e as condições ou exceções "
-        "presentes nos acórdãos recuperados. Cite as fontes usando os identificadores "
-        "fornecidos no contexto. Use exclusivamente essas fontes, sem inventar "
-        "decisões, fatos, regras ou referências. Não apresente a conclusão como posição "
-        "de todo o STJ se as fontes não sustentarem essa abrangência. "
-        "Quando houver base suficiente, termine com um exemplo hipotético breve, "
-        "claramente identificado como 'Exemplo ilustrativo', em um único parágrafo "
-        "curto. O exemplo deve apenas ilustrar uma regra sustentada pelas fontes, "
-        "sem afirmar que é um caso real ou garantir um resultado. "
-        "Se as fontes forem insuficientes, explique a limitação e omita o exemplo."
-    )
+    question = result.get("followup") or result["query"]
+    options = {key: value for key, value in result["search_options"].items() if key != "k"}
     try:
-        result['answer'] = generate(synthesis_question, result['hits'][:result["search_options"]["k"]])
+        if result.get("followup"):
+            topic = result["query"]
+            focused = synthesis_sources(f"{topic} {question}", **options)
+            original = synthesis_sources(topic, **options)
+            by_id = {hit["id"]: hit for hit in focused[:4] + original + focused[4:]}
+            sources = list(by_id.values())[:8]
+            question = f"Tema da pesquisa inicial: {topic}\nPergunta de acompanhamento: {question}"
+        else:
+            sources = synthesis_sources(question, **options)
+        result["synthesis_hits"] = sources
+        result["answer"] = generate(question, sources)
     except Exception as exc:
         details = str(exc)
         # Oculta a chave caso ela apareça na mensagem da API.
@@ -237,7 +233,7 @@ def make_synthesis(result):
         api_key = os.getenv("GEMINI_API_KEY")
         if api_key:
             details = details.replace(api_key, "[CHAVE OCULTA]")
-        details = re.sub(r"AIza[\w-]+", "[CHAVE OCULTA]", details)
+        details = re.sub(r"(?:AIza|AQ\.)[\w-]+", "[CHAVE OCULTA]", details)
         result["ai_error_details"] = details
         reason = str(exc).lower()
         if '503' in reason or 'high demand' in reason:
@@ -245,7 +241,7 @@ def make_synthesis(result):
         elif '429' in reason:
             result['warning'] = 'O limite de uso do Gemini foi atingido. Tente a síntese mais tarde.'
         elif 'gemini_api_key' in reason:
-            result['warning'] = 'Configure GEMINI_API_KEY no arquivo .env e reinicie a plataforma.'
+            result['warning'] = 'Configure GEMINI_API_KEY nos Secrets do Streamlit Cloud ou no arquivo .env da instalação local.'
         elif '404' in reason:
             result['warning'] = 'O modelo Gemini configurado não está disponível. Confira GEMINI_MODEL nos Secrets do Streamlit Cloud ou no .env se estiver rodando localmente.'
         else:
@@ -366,10 +362,12 @@ def start_search(question, colored, display_mode, apply_correction=False, **opti
     return True
 
 
-def start_synthesis(result):
+def start_synthesis(result, followup=""):
     if task_busy():
         return False
     result["synthesis_attempted"] = True
+    result["followup"] = followup
+    result["answer"] = ""
     result["warning"] = ""
     result.pop("ai_error_details", None)
     st.session_state.pop("jurisia_job_error", None)
@@ -491,37 +489,49 @@ def research_results():
             st.caption("Todos os resultados disponíveis para esta busca foram exibidos.")
         # Renderiza as decisões antes de chamar um serviço externo.
         with synthesis_slot:
-            if result['hits']:
-                with st.container(border=True):
-                    st.markdown("#### Síntese")
-                    st.caption("A síntese usa a primeira página de acórdãos. A pergunta e os trechos são enviados ao Gemini.")
-                    request_ai = st.button(
-                        "Gerar novamente" if result.get("answer") else "Gerar síntese",
-                        key="make_synthesis", disabled=task_busy())
-                    if request_ai:
-                        if start_synthesis(result):
-                            st.rerun()
-                    if task_busy() and st.session_state.get("jurisia_phase") == "synthesis":
-                        st.status("Gerando síntese… Você pode alterar a aparência.", state="running", expanded=False)
-                    if result.get('warning'):
-                        st.warning(result['warning'])
-                    if result.get("ai_error_details"):
-                        st.error("Detalhes do erro do Gemini:")
-                        st.code(result["ai_error_details"], language="text")
-                    if result.get('answer'):
-                        st.write(readable_citations(result['answer'], result['hits']))
-                        st.caption(f"Síntese: {result['ai_seconds']:.1f} segundos · Confira as afirmações nas fontes citadas.")
-                        for number in dict.fromkeys(map(int, re.findall(r"\[D(\d+)\]", result["answer"]))):
-                            if not 1 <= number <= len(result["hits"]):
-                                continue
-                            hit = result["hits"][number - 1]
-                            doc = hit["document"]
-                            st.subheader(f"D{number} · {doc.get('process_class') or ''} {doc.get('process_number') or hit['id']}",
-                                         anchor=f"fonte-d{number}")
-                            st.caption(f"Julgamento: {date_label(doc.get('decision_date'))} · {doc.get('court_body') or 'Órgão não informado'}")
-                            st.text(hit["snippet"])
-                            with st.expander("Ver início da ementa enviado ao Gemini"):
-                                st.text((doc.get("ementa") or "")[:CONTEXT_EMENTA_CHARS])
+            with st.container(border=True):
+                st.markdown("#### Síntese com IA")
+                st.caption("A síntese busca até oito acórdãos por relevância, respeitando os filtros da consulta. A pergunta e os trechos selecionados são enviados ao Gemini.")
+                request_ai = st.button(
+                    "Gerar novamente" if result.get("answer") else "Gerar síntese",
+                    key="make_synthesis", disabled=task_busy())
+                if request_ai:
+                    if start_synthesis(result):
+                        st.rerun()
+                if task_busy() and st.session_state.get("jurisia_phase") == "synthesis":
+                    st.status("Buscando ementas relevantes e preparando a síntese…", state="running", expanded=False)
+                if result.get('warning'):
+                    st.warning(result['warning'])
+                if result.get("ai_error_details"):
+                    st.error("Detalhes do erro do Gemini:")
+                    st.code(result["ai_error_details"], language="text")
+                if result.get('answer'):
+                    sources = result.get("synthesis_hits", result["hits"])
+                    if result.get("followup"):
+                        st.write("Pergunta de acompanhamento")
+                        st.text(result["followup"])
+                    st.markdown(readable_citations(result["answer"], sources))
+                    st.caption(f"Síntese: {result['ai_seconds']:.1f} segundos · Confira as afirmações nas fontes citadas.")
+                    for number in dict.fromkeys(map(int, re.findall(r"\[D(\d+)\]", result["answer"]))):
+                        if not 1 <= number <= len(sources):
+                            continue
+                        hit = sources[number - 1]
+                        doc = hit["document"]
+                        st.subheader(f"D{number} · {doc.get('process_class') or ''} {doc.get('process_number') or hit['id']}",
+                                     anchor=f"fonte-d{number}")
+                        st.caption(f"Julgamento: {date_label(doc.get('decision_date'))} · {doc.get('court_body') or 'Órgão não informado'}")
+                        st.text(hit["snippet"])
+                        st.markdown(f"[Consultar no portal do STJ]({STJ_PORTAL_URL})")
+                        with st.expander("Ver início da ementa enviado ao Gemini"):
+                            st.text((doc.get("ementa") or "")[:CONTEXT_EMENTA_CHARS])
+                if result.get("synthesis_attempted"):
+                    with st.form("synthesis_followup", clear_on_submit=True):
+                        followup = st.text_input("Pergunte mais sobre o tema", max_chars=1000)
+                        if st.form_submit_button("Pesquisar e responder", disabled=task_busy()):
+                            if followup.strip() and start_synthesis(result, followup.strip()):
+                                st.rerun()
+                            if not followup.strip():
+                                st.warning("Digite uma pergunta de acompanhamento.")
         st.caption("Participação opcional. Evite dados pessoais no comentário.")
         with st.form(f"feedback_{result['question_id']}"):
             st.markdown("#### Avalie esta pesquisa")
