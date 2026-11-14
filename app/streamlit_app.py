@@ -745,13 +745,12 @@ elif page == "Meu caderno":
 
 else:
     st.title("Dados da base")
-    st.caption("Acompanhe a cobertura dos documentos importados e as consultas realizadas.")
+    st.caption("Acompanhe a cobertura da base de acórdãos.")
     st.link_button("Consultar jurisprudência no portal do STJ ↗", STJ_PORTAL_URL)
     values = metrics()
-    a, b, c = st.columns(3)
+    a, b = st.columns(2)
     a.metric("Acórdãos importados", f"{values['documents']:,}".replace(",", "."))
-    b.metric("Consultas realizadas", values["questions"])
-    c.metric("Tempo médio registrado", f"{values['avg_seconds']:.1f} s")
+    b.metric("Tempo médio registrado", f"{values['avg_seconds']:.1f} s")
     st.caption(f"Busca: {values.get('avg_search_seconds', 0):.1f} s em média · Síntese: {values.get('avg_synthesis_seconds', 0):.1f} s em média. As etapas podem ter quantidades diferentes de registros.")
     st.caption(f"Avaliações recebidas: {values['feedback']} · Utilidade percebida: " +
                (f"{values['useful_rate']:.0%}" if values['useful_rate'] is not None else "Ainda sem respostas"))
