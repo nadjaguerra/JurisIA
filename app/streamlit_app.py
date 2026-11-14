@@ -247,7 +247,7 @@ def make_synthesis(result):
         elif 'gemini_api_key' in reason:
             result['warning'] = 'Configure GEMINI_API_KEY no arquivo .env e reinicie a plataforma.'
         elif '404' in reason:
-            result['warning'] = 'O modelo configurado não está disponível. Confira GEMINI_MODEL no arquivo .env.'
+            result['warning'] = 'O modelo Gemini configurado não está disponível. Confira GEMINI_MODEL nos Secrets do Streamlit Cloud ou no .env se estiver rodando localmente.'
         else:
             result['warning'] = 'Não foi possível gerar a síntese. Confira a conexão e a configuração do Gemini.'
         result['answer'] = ''

@@ -14,7 +14,7 @@ COLLECTION = "ementas_stj_v1"
 EMBEDDING_MODEL = os.getenv(
     "EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 )
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
 STJ_DATASETS = [
     f"espelhos-de-acordaos-{name}-turma"
